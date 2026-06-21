@@ -29,8 +29,8 @@ def main():
 
     # Step 2: Initialize database
     print("\n[INIT] Setting up database...")
-    database.clear_all_tables()   # fresh run each time
     database.create_tables()
+    database.clear_all_tables()   # fresh run each time
 
     # Step 3: Parse log file
     parse_results = parse_log_file()
