@@ -1,0 +1,55 @@
+============================================================
+       FAILED LOGIN DETECTOR — SECURITY REPORT
+       Generated: 2026-06-21 19:02:26
+============================================================
+
+[1] SUMMARY
+----------------------------------------
+  Total login attempts : 16
+  Failed attempts      : 14
+  Successful logins    : 2
+  Alerts generated     : 2
+  Unique IPs seen      : 5
+
+[2] ALERTS
+----------------------------------------
+
+  [!!]  MEDIUM ALERT
+     Type       : CREDENTIAL_STUFFING
+     IP Address : 192.168.1.105
+     Failures   : 6
+     Usernames  : root, admin, matthew, test, user
+     First seen : Apr 25 10:23:01
+     Last seen  : Apr 25 10:23:11
+
+  [!!]  MEDIUM ALERT
+     Type       : BRUTE_FORCE
+     IP Address : 203.0.113.42
+     Failures   : 5
+     Usernames  : root
+     First seen : Apr 25 10:24:01
+     Last seen  : Apr 25 10:24:09
+
+[3] IP ADDRESS SUMMARY
+----------------------------------------
+  IP Address          Total  Failed  Success  Usernames
+  ----------------------------------------------------
+  192.168.1.105           6       6        0          5
+  203.0.113.42            5       5        0          1
+  198.51.100.7            3       3        0          1
+  192.168.1.200           1       0        1          1
+  10.0.0.5                1       0        1          1
+
+[4] RECOMMENDATIONS
+----------------------------------------
+  Based on the analysis, consider:
+  - Block the following IP addresses at firewall:
+      iptables -A INPUT -s 192.168.1.105 -j DROP
+      iptables -A INPUT -s 203.0.113.42 -j DROP
+  - Enable account lockout after 5 failed attempts
+  - Consider deploying fail2ban on SSH service
+  - Review successful logins from flagged IPs
+
+============================================================
+                    END OF REPORT
+============================================================
