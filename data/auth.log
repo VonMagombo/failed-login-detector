@@ -14,3 +14,21 @@ Apr 25 10:25:01 server sshd[1234]: Accepted password for root from 10.0.0.5 port
 Apr 25 10:25:15 server sshd[1234]: Failed password for oracle from 198.51.100.7 port 22 ssh2
 Apr 25 10:25:17 server sshd[1234]: Failed password for oracle from 198.51.100.7 port 22 ssh2
 Apr 25 10:25:19 server sshd[1234]: Failed password for oracle from 198.51.100.7 port 22 ssh2
+Apr 25 10:26:30 server sshd[1301]: Accepted password for test from 192.168.1.105 port 52211 ssh2
+Apr 25 10:30:00 server sshd[1400]: Invalid user support from 45.33.32.156 port 40122
+Apr 25 10:30:01 server sshd[1400]: Failed password for invalid user support from 45.33.32.156 port 40122 ssh2
+Apr 25 10:30:03 server sshd[1401]: Failed password for invalid user ubuntu from 45.33.32.156 port 40130 ssh2
+Apr 25 10:30:05 server sshd[1402]: Failed password for invalid user git from 45.33.32.156 port 40138 ssh2
+Apr 25 10:30:07 server sshd[1403]: Failed password for invalid user deploy-bot from 45.33.32.156 port 40144 ssh2
+Apr 25 10:30:09 server sshd[1404]: Failed password for invalid user postgres from 45.33.32.156 port 40150 ssh2
+Apr 25 10:31:00 server sshd[1500]: Failed password for root from 2001:db8::bad port 50022 ssh2
+Apr 25 10:31:02 server sshd[1500]: message repeated 4 times: [ Failed password for root from 2001:db8::bad port 50022 ssh2]
+Apr 25 10:31:20 server sshd[1501]: Connection closed by authenticating user root 2001:db8::bad port 50022 [preauth]
+Apr 25 11:00:00 server sshd[1600]: Failed password for alice from 10.0.0.23 port 61000 ssh2
+Apr 25 11:20:00 server sshd[1601]: Failed password for alice from 10.0.0.23 port 61002 ssh2
+Apr 25 11:40:00 server sshd[1602]: Failed password for alice from 10.0.0.23 port 61004 ssh2
+Apr 25 12:00:00 server sshd[1603]: Failed password for alice from 10.0.0.23 port 61006 ssh2
+Apr 25 12:20:00 server sshd[1604]: Failed password for alice from 10.0.0.23 port 61008 ssh2
+Apr 25 12:25:00 server sshd[1605]: Accepted publickey for alice from 10.0.0.23 port 61010 ssh2: ED25519 SHA256:3fQ1kVb0Xh2rT9yJ8uLmN4pZcWdEoGaHsIjKl5MnOpQ
+Apr 25 12:30:00 server sudo:    alice : TTY=pts/0 ; PWD=/home/alice ; USER=root ; COMMAND=/usr/bin/apt update
+Apr 25 12:30:01 server CRON[1700]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)

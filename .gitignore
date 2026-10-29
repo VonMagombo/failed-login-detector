@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+venv/
+.venv/
+
+# Generated on every run
+database/*.db
+reports/*.txt
+
+# Secrets
+.env

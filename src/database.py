@@ -15,29 +15,44 @@ def get_connection():
     return conn
 
 
+def reset_database():
+    """
+    Drops and recreates all tables, so every run starts fresh.
+
+    Dropping (instead of DELETE FROM) also means a database file created by
+    an older version of this tool, with an older schema, can't break the run.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    for table in ("logs", "alerts", "ip_summary"):
+        cursor.execute(f"DROP TABLE IF EXISTS {table}")  # fixed names, not user input
+    conn.commit()
+    conn.close()
+    create_tables()
+
+
 def create_tables():
-    """
-    Creates all database tables if they don't exist yet.
-    Run this once when the program starts.
-    """
+    """Creates all database tables if they don't exist yet."""
     conn = get_connection()
     cursor = conn.cursor()
 
     # --- TABLE 1: logs ---
     # Stores every single login attempt from the log file
+    # timestamp is "YYYY-MM-DD HH:MM:SS" so it sorts correctly as text
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS logs (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp   TEXT NOT NULL,
-            ip_address  TEXT NOT NULL,
-            username    TEXT NOT NULL,
-            status      TEXT NOT NULL,
-            raw_line    TEXT
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp    TEXT NOT NULL,
+            ip_address   TEXT NOT NULL,
+            username     TEXT NOT NULL,
+            status       TEXT NOT NULL,
+            auth_method  TEXT,
+            invalid_user INTEGER DEFAULT 0,
+            port         INTEGER,
+            raw_line     TEXT
         )
     ''')
-    # AUTOINCREMENT means the database assigns IDs automatically
-    # NOT NULL means the field is required
-    # TEXT is the data type for strings in SQLite
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_logs_ip_time ON logs (ip_address, timestamp)')
 
     # --- TABLE 2: alerts ---
     # Stores generated alerts when suspicious activity is detected
@@ -51,6 +66,7 @@ def create_tables():
             usernames_tried TEXT,
             first_seen      TEXT,
             last_seen       TEXT,
+            details         TEXT,
             created_at      TEXT DEFAULT CURRENT_TIMESTAMP
         )
     ''')
@@ -76,91 +92,81 @@ def create_tables():
     print("[DB] Tables created successfully")
 
 
-def insert_log(timestamp, ip_address, username, status, raw_line):
+def insert_logs(events):
     """
-    Inserts a single log entry into the logs table.
-    Called by the parser for every line it reads.
+    Inserts parsed events into the logs table in one transaction.
+    An event with count=N (rsyslog "message repeated N times") becomes N rows,
+    so every query below can simply count rows.
+    Returns the number of rows inserted.
     """
-    conn = get_connection()
-    cursor = conn.cursor()
+    rows = []
+    for e in events:
+        row = (e['timestamp'], e['ip_address'], e['username'], e['status'],
+               e.get('auth_method'), int(e.get('invalid_user', False)),
+               e.get('port'), e['raw_line'])
+        rows.extend([row] * e.get('count', 1))
 
-    cursor.execute('''
-        INSERT INTO logs (timestamp, ip_address, username, status, raw_line)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (timestamp, ip_address, username, status, raw_line))
+    conn = get_connection()
+    conn.executemany('''
+        INSERT INTO logs (timestamp, ip_address, username, status,
+                          auth_method, invalid_user, port, raw_line)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', rows)
     # IMPORTANT: Always use ? placeholders, never f-strings for SQL
     # f-strings are vulnerable to SQL injection attacks
     # ? tells SQLite to safely escape the values
-
     conn.commit()
     conn.close()
+    return len(rows)
 
 
-def update_ip_summary(ip_address, status, username, timestamp):
+def rebuild_ip_summary():
     """
-    Updates the ip_summary table after each log entry.
-    Uses INSERT OR REPLACE to handle both new and existing IPs.
+    Recomputes ip_summary from the logs table with one GROUP BY query.
+    Cheaper and simpler than updating a row for every log line.
     """
     conn = get_connection()
-    cursor = conn.cursor()
-
-    # First check if this IP already exists in summary
-    cursor.execute(
-        "SELECT * FROM ip_summary WHERE ip_address = ?",
-        (ip_address,)
-    )
-    existing = cursor.fetchone()
-
-    if existing is None:
-        # New IP — insert fresh record
-        failed = 1 if status == "FAILED" else 0
-        success = 1 if status == "SUCCESS" else 0
-        cursor.execute('''
-            INSERT INTO ip_summary 
-            (ip_address, total_attempts, failed_attempts, 
-             success_attempts, unique_usernames, first_seen, last_seen)
-            VALUES (?, 1, ?, ?, 1, ?, ?)
-        ''', (ip_address, failed, success, timestamp, timestamp))
-    else:
-        # Existing IP — update their counts
-        failed_increment = 1 if status == "FAILED" else 0
-        success_increment = 1 if status == "SUCCESS" else 0
-
-        # Count how many unique usernames this IP has tried
-        cursor.execute('''
-            SELECT COUNT(DISTINCT username) as unique_count
-            FROM logs WHERE ip_address = ?
-        ''', (ip_address,))
-        unique_count = cursor.fetchone()['unique_count']
-
-        cursor.execute('''
-            UPDATE ip_summary SET
-                total_attempts   = total_attempts + 1,
-                failed_attempts  = failed_attempts + ?,
-                success_attempts = success_attempts + ?,
-                unique_usernames = ?,
-                last_seen        = ?
-            WHERE ip_address = ?
-        ''', (failed_increment, success_increment,
-              unique_count, timestamp, ip_address))
-
+    conn.execute("DELETE FROM ip_summary")
+    conn.execute('''
+        INSERT INTO ip_summary
+            (ip_address, total_attempts, failed_attempts, success_attempts,
+             unique_usernames, first_seen, last_seen)
+        SELECT
+            ip_address,
+            COUNT(*),
+            SUM(status = 'FAILED'),
+            SUM(status = 'SUCCESS'),
+            COUNT(DISTINCT username),
+            MIN(timestamp),
+            MAX(timestamp)
+        FROM logs
+        GROUP BY ip_address
+    ''')
     conn.commit()
     conn.close()
 
 
-def insert_alert(ip_address, alert_type, severity,
-                 failed_count, usernames_tried, first_seen, last_seen):
+def flag_ip(ip_address):
+    """Marks an IP as flagged in the summary (shown as << FLAGGED in the report)."""
+    conn = get_connection()
+    conn.execute("UPDATE ip_summary SET is_flagged = 1 WHERE ip_address = ?", (ip_address,))
+    conn.commit()
+    conn.close()
+
+
+def insert_alert(ip_address, alert_type, severity, failed_count,
+                 usernames_tried, first_seen, last_seen, details=None):
     """Saves a generated alert to the database."""
     conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute('''
-        INSERT INTO alerts 
-        (ip_address, alert_type, severity, failed_count, 
-         usernames_tried, first_seen, last_seen)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO alerts
+        (ip_address, alert_type, severity, failed_count,
+         usernames_tried, first_seen, last_seen, details)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ''', (ip_address, alert_type, severity, failed_count,
-          usernames_tried, first_seen, last_seen))
+          usernames_tried, first_seen, last_seen, details))
 
     conn.commit()
     conn.close()
@@ -170,47 +176,37 @@ def get_all_logs():
     """Retrieves all log entries."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM logs ORDER BY timestamp")
+    cursor.execute("SELECT * FROM logs ORDER BY timestamp, id")
     rows = cursor.fetchall()
     conn.close()
     return rows
 
 
-def get_failed_logins_by_ip():
+def get_logs_by_ip():
     """
-    Key query: groups failed logins by IP address.
-    This is the core detection query.
+    Returns {ip_address: [rows in time order]} for every IP.
+    The analyzer walks these timelines to find bursts and compromises.
     """
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute('''
-        SELECT 
-            ip_address,
-            COUNT(*) as failed_count,
-            COUNT(DISTINCT username) as unique_usernames,
-            MIN(timestamp) as first_seen,
-            MAX(timestamp) as last_seen
-        FROM logs
-        WHERE status = 'FAILED'
-        GROUP BY ip_address
-        ORDER BY failed_count DESC
-    ''')
-    # GROUP BY combines all rows with same IP into one row
-    # COUNT(*) counts how many rows in each group
-    # COUNT(DISTINCT username) counts unique usernames per IP
-    # MIN/MAX get earliest and latest timestamps
-
-    rows = cursor.fetchall()
-    conn.close()
-    return rows
+    timelines = {}
+    for row in get_all_logs():
+        timelines.setdefault(row['ip_address'], []).append(row)
+    return timelines
 
 
 def get_all_alerts():
-    """Retrieves all generated alerts."""
+    """Retrieves all generated alerts, most severe first."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM alerts ORDER BY created_at DESC")
+    cursor.execute('''
+        SELECT * FROM alerts
+        ORDER BY CASE severity
+                     WHEN 'CRITICAL' THEN 0
+                     WHEN 'HIGH'     THEN 1
+                     WHEN 'MEDIUM'   THEN 2
+                     ELSE 3
+                 END,
+                 failed_count DESC, id
+    ''')
     rows = cursor.fetchall()
     conn.close()
     return rows
@@ -221,21 +217,9 @@ def get_ip_summary():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT * FROM ip_summary 
-        ORDER BY failed_attempts DESC
+        SELECT * FROM ip_summary
+        ORDER BY failed_attempts DESC, ip_address
     ''')
     rows = cursor.fetchall()
     conn.close()
     return rows
-
-
-def clear_all_tables():
-    """Clears all data — useful for re-running the program fresh."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM logs")
-    cursor.execute("DELETE FROM alerts")
-    cursor.execute("DELETE FROM ip_summary")
-    conn.commit()
-    conn.close()
-    print("[DB] All tables cleared")
