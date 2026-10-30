@@ -1,4 +1,5 @@
 # src/reporter.py
+import ipaddress
 import config
 import src.database as database
 from datetime import datetime
@@ -12,6 +13,24 @@ def get_severity_symbol(severity):
         "CRITICAL": "[***]"
     }
     return symbols.get(severity, "[?]")
+
+
+def unique_ips(alerts):
+    """IPs from the alerts, once each, in alert order (most severe first)."""
+    return list(dict.fromkeys(a['ip_address'] for a in alerts))
+
+
+def block_command(source):
+    """
+    The firewall rule for one source: iptables for IPv4, ip6tables for IPv6.
+    A hostname (sshd UseDNS) can't be blocked reliably, so say that instead.
+    """
+    try:
+        version = ipaddress.ip_address(source).version
+    except ValueError:
+        return f"# {source} is a hostname, resolve it and block the IP"
+    tool = "iptables" if version == 4 else "ip6tables"
+    return f"{tool} -A INPUT -s {source} -j DROP"
 
 
 def generate_report():
@@ -56,6 +75,8 @@ def generate_report():
             lines.append(f"     Usernames  : {alert['usernames_tried']}")
             lines.append(f"     First seen : {alert['first_seen']}")
             lines.append(f"     Last seen  : {alert['last_seen']}")
+            if alert['details']:
+                lines.append(f"     Details    : {alert['details']}")
     else:
         lines.append("  No alerts generated.")
 
@@ -84,14 +105,19 @@ def generate_report():
     lines.append("-" * 40)
 
     if all_alerts:
-        flagged_ips = [a['ip_address'] for a in all_alerts]
         lines.append("  Based on the analysis, consider:")
         lines.append("  - Block the following IP addresses at firewall:")
-        for ip in set(flagged_ips):
-            lines.append(f"      iptables -A INPUT -s {ip} -j DROP")
+        for ip in unique_ips(all_alerts):
+            lines.append(f"      {block_command(ip)}")
+        compromised = [a for a in all_alerts if a['alert_type'] == 'POSSIBLE_COMPROMISE']
+        if compromised:
+            lines.append("  - URGENT: treat these logins as compromised. Kill their sessions,")
+            lines.append("    reset the passwords, and check the accounts for persistence:")
+            for a in compromised:
+                lines.append(f"      {a['ip_address']}: {a['details']}")
         lines.append("  - Enable account lockout after 5 failed attempts")
         lines.append("  - Consider deploying fail2ban on SSH service")
-        lines.append("  - Review successful logins from flagged IPs")
+        lines.append("  - Disable password auth (PasswordAuthentication no) and use keys")
     else:
         lines.append("  No immediate action required.")
 

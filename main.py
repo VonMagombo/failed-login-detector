@@ -2,6 +2,7 @@
 # This is the file you run. It orchestrates everything.
 
 import os
+import sys
 import config
 import src.database as database
 from src.parser   import parse_log_file
@@ -14,7 +15,6 @@ def setup():
     os.makedirs("data",     exist_ok=True)
     os.makedirs("database", exist_ok=True)
     os.makedirs("reports",  exist_ok=True)
-    os.makedirs("src",      exist_ok=True)
 
 
 def main():
@@ -29,11 +29,11 @@ def main():
 
     # Step 2: Initialize database
     print("\n[INIT] Setting up database...")
-    database.create_tables()
-    database.clear_all_tables()   # fresh run each time
+    database.reset_database()   # fresh run each time
 
-    # Step 3: Parse log file
-    parse_results = parse_log_file()
+    # Step 3: Parse log file (optional path argument: python3 main.py /var/log/auth.log)
+    log_path = sys.argv[1] if len(sys.argv) > 1 else config.LOG_FILE_PATH
+    parse_results = parse_log_file(log_path)
     if not parse_results:
         print("[ERROR] Could not parse log file. Exiting.")
         return

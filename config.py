@@ -6,6 +6,7 @@
 FAILED_LOGIN_THRESHOLD = 5      # alert if IP fails this many times
 TIME_WINDOW_MINUTES = 10        # within this many minutes
 UNIQUE_USERNAMES_THRESHOLD = 3  # alert if IP tries this many different usernames
+COMPROMISE_LOOKBACK_DAYS = 7    # a success this long after a burst is a possible compromise
 
 # --- File Paths ---
 LOG_FILE_PATH = "data/auth.log"
